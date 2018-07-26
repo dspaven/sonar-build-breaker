@@ -35,58 +35,70 @@ import org.sonar.api.utils.log.Loggers;
 public class BasicIssuesBuildBreaker implements PostJob, PostJobsPhaseHandler {
   private static final String CLASSNAME = BasicIssuesBuildBreaker.class.getSimpleName();
 
-  private static final Logger LOG = Loggers.get(ForbiddenConfigurationBreaker.class);
+  private static final Logger LOGGER = Loggers.get(ForbiddenConfigurationBreaker.class);
 
   private final ProjectIssues projectIssues;
   private final AnalysisMode analysisMode;
+  private final boolean skipBuildBreaker;
   private final String failForIssuesWithSeverity;
   private final int failForIssueSeverityAsInt;
+  private final boolean failForNewIssuesOnly;
   
   String failureMessage = null;
   
   public BasicIssuesBuildBreaker(AnalysisMode analysisMode, ProjectIssues projectIssues, Settings settings) {
     this.analysisMode = analysisMode;
     this.projectIssues = projectIssues;
-    
+
+    skipBuildBreaker = settings.getBoolean(BuildBreakerPlugin.SKIP_KEY);
     failForIssuesWithSeverity = settings.getString(BuildBreakerPlugin.FAIL_FOR_ISSUES_WITH_SEVERITY_KEY);
     failForIssueSeverityAsInt = Severity.ALL.indexOf(failForIssuesWithSeverity.trim().toUpperCase());
-    
+    failForNewIssuesOnly = settings.getBoolean(BuildBreakerPlugin.FAIL_FOR_NEW_ISSUES_ONLY);
   }
 
   @Override
   public void executeOn(Project project, SensorContext context) {
     if (analysisMode.isPublish()) {
-      LOG.debug("{} is disabled ({} == {})", CLASSNAME, CoreProperties.ANALYSIS_MODE, CoreProperties.ANALYSIS_MODE_PUBLISH);
+      LOGGER.debug("{} is disabled ({} == {})", CLASSNAME, CoreProperties.ANALYSIS_MODE, CoreProperties.ANALYSIS_MODE_PUBLISH);
+      return;
+    }
+
+    if (skipBuildBreaker) {
+      LOGGER.debug("{} is disabled ({} = true)", CLASSNAME, BuildBreakerPlugin.SKIP_KEY);
       return;
     }
     
     if(failForIssueSeverityAsInt < 0) {
-      LOG.debug("failForIssuesWithSeverity is configured to {}", failForIssuesWithSeverity);
+      LOGGER.debug("failForIssuesWithSeverity configured to {} is invalid", failForIssuesWithSeverity);
       return;
     }
 
     int issueCountToFailFor = 0;
     for(Issue issue: projectIssues.issues()) {
+      if (this.failForNewIssuesOnly && !issue.isNew()) {
+        // Ignore issues that aren't new
+        continue;
+      }
+
       String severity = issue.severity();
       int issueSeverityAsInt = Severity.ALL.indexOf(String.valueOf(severity).trim().toUpperCase());
+
       if (issueSeverityAsInt >= failForIssueSeverityAsInt) {
-        LOG.info("Recording issue {} that has a severity of '{}'",
-            issue.key(), severity);
+        LOGGER.debug("Recording issue {} that has a severity of '{}'", issue.key(), severity);
         issueCountToFailFor++;
       }
     }
 
     if (issueCountToFailFor > 0) {
-      String msg = "Project " + project.getName() + " has " + issueCountToFailFor
-          + " issues that are of severity equal or higher than " + failForIssuesWithSeverity;
-      LOG.debug(msg);
+      String msg = "Project " + project.getName() + " has " + issueCountToFailFor + (this.failForNewIssuesOnly ? " new" : "")
+              + " issues that are of severity equal or higher than " + failForIssuesWithSeverity;
+      LOGGER.debug(msg);
       // only mark failure and fail on PostJobsPhaseHandler.onPostJobsPhase() to ensure other plugins can finish their work, most notably the stash issue reporter plugin
       markFailure(msg);
       
     } else {
-      LOG.info("Project " + project.getName() + " has no issues with severity equal or higher than " + failForIssuesWithSeverity);
+      LOGGER.info("Project " + project.getName() + " has no{} issues with severity equal or higher than " + failForIssuesWithSeverity, this.failForNewIssuesOnly ? " new" : "");
     }
-    
   }
   
   public void markFailure(String failureMessage) {
@@ -96,7 +108,7 @@ public class BasicIssuesBuildBreaker implements PostJob, PostJobsPhaseHandler {
   @Override
   public void onPostJobsPhase(PostJobsPhaseEvent event) {
     if(event.isEnd() && failureMessage!=null) {
-      LOG.error(BuildBreakerPlugin.BUILD_BREAKER_LOG_STAMP+" "+failureMessage);
+      LOGGER.error(BuildBreakerPlugin.BUILD_BREAKER_LOG_STAMP + " " + failureMessage);
       throw new IllegalStateException(failureMessage);
     }
   }

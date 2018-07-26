@@ -74,6 +74,13 @@ import java.util.List;
         Severity.INFO, Severity.MINOR, Severity.MAJOR, Severity.CRITICAL, Severity.BLOCKER},
     defaultValue = Severity.MAJOR,
     global = true,
+    project = true),
+  @Property(key = BuildBreakerPlugin.FAIL_FOR_NEW_ISSUES_ONLY,
+    name = "Fail preview analysis on new issues only",
+    description = "Fails the build for preview analysis modes for new issues only",
+    type = PropertyType.BOOLEAN,
+    defaultValue = "false",
+    global = true,
     project = true)
 })
 public class BuildBreakerPlugin extends SonarPlugin {
@@ -95,6 +102,8 @@ public class BuildBreakerPlugin extends SonarPlugin {
 
   public static final String FAIL_FOR_ISSUES_WITH_SEVERITY_KEY = "sonar.buildbreaker.preview.failForIssuesWithSeverity";
   public static final String FAIL_FOR_ISSUES_DISABLED = "DISABLED";
+
+  public static final String FAIL_FOR_NEW_ISSUES_ONLY = "sonar.buildbreaker.preview.failForNewIssuesOnly";
 
   @Override
   public List getExtensions() {
